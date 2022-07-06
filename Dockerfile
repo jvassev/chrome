@@ -1,52 +1,54 @@
-FROM ubuntu:18.04
+FROM ubuntu:bionic
 
-LABEL maintainer="Tomohisa Kusano <siomiz@gmail.com>"
+ENV VNC_SCREEN_SIZE 1920x1200
+ENV TZ=UTC
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-ENV VNC_SCREEN_SIZE 1024x768
+EXPOSE 5900 6080
+ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 
-COPY copyables /
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends \
+	&& apt-get install -y \
 	gnupg2 \
+	curl \
 	fonts-noto-cjk \
 	pulseaudio \
 	supervisor \
+	python3 \
 	x11vnc \
 	fluxbox \
+	git \
+	xvfb \
 	eterm
 
-ADD https://dl.google.com/linux/linux_signing_key.pub \
-	https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-	https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb \
-	/tmp/
+# Install Google Chrome
+RUN curl -sS -o - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
+	echo "deb http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list && \
+	apt-get -y update && \
+	apt-get -y install google-chrome-stable && \
+	rm -rf /var/lib/apt/lists/*
 
-RUN apt-key add /tmp/linux_signing_key.pub \
-	&& dpkg -i /tmp/google-chrome-stable_current_amd64.deb \
-	|| dpkg -i /tmp/chrome-remote-desktop_current_amd64.deb \
-	|| apt-get -f --yes install
+COPY copyables /
 
 RUN apt-get clean \
 	&& rm -rf /var/cache/* /var/log/apt/* /var/lib/apt/lists/* /tmp/* \
-	&& useradd -m -G chrome-remote-desktop,pulse-access chrome \
+	&& useradd -m -G pulse-access chrome \
 	&& usermod -s /bin/bash chrome \
-	&& ln -s /crdonly /usr/local/sbin/crdonly \
-	&& ln -s /update /usr/local/sbin/update \
-	&& mkdir -p /home/chrome/.config/chrome-remote-desktop \
-	&& mkdir -p /home/chrome/.fluxbox \
+	&& mkdir -p /home/chrome/.fluxbox /home/chrome/.config \
 	&& echo ' \n\
-		session.screen0.toolbar.visible:        false\n\
-		session.screen0.fullMaximization:       true\n\
-		session.screen0.maxDisableResize:       true\n\
-		session.screen0.maxDisableMove: true\n\
-		session.screen0.defaultDeco:    NONE\n\
+	session.screen0.toolbar.visible:        false\n\
+	session.screen0.fullMaximization:       true\n\
+	session.screen0.maxDisableResize:       true\n\
+	session.screen0.maxDisableMove: true\n\
+	session.screen0.defaultDeco:    NONE\n\
 	' >> /home/chrome/.fluxbox/init \
 	&& chown -R chrome:chrome /home/chrome/.config /home/chrome/.fluxbox
 
-VOLUME ["/home/chrome"]
+RUN git clone https://github.com/kanaka/noVNC.git    /home/chrome/novnc  && \
+	cd /home/chrome/novnc && git checkout v1.1.0 && \
+	rm -fr .git && \
+	git clone https://github.com/kanaka/websockify.git --depth 1 /home/chrome/novnc/utils/websockify
 
-EXPOSE 5900
-
-ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
-
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+COPY vnc_auto.html  /home/chrome/novnc/index.html
